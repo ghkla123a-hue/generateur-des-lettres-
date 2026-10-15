@@ -1,0 +1,114 @@
+# Activité 4 : Simulation des risques de fraude aux examens
+# Fichier CSV : export des réponses Google Forms (questions Q3 à Q14)
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+
+# ---------------- Paramètres ----------------
+CSV_PATH = "Reponses_simulees.csv"
+
+# Questions de probabilité et d'impact pour chaque risque
+risques = {
+    "R1": ("Milieu", "Surveillance", [6], [11]),
+    "R2": ("Machine", "Appareils / accès aux réponses", [7, 8], [12]),
+    "R3": ("Main-d'œuvre", "Pression des notes", [3], [13]),
+    "R4": ("Matière", "Préparation / difficulté", [4, 5], [13]),
+    "R5": ("Management", "Sanctions", [9], [14]),
+    "R6": ("Main-d'œuvre", "Influence des pairs", [10], [])
+}
+
+# ---------------- Lecture des données ----------------
+df = pd.read_csv(CSV_PATH)
+print(len(df), "réponses chargées")
+
+# On garde seulement les colonnes Q3 à Q14
+colonnes = [c for c in df.columns if c.startswith("Q")]
+df = df[colonnes]
+
+# ---------------- Fonctions ----------------
+def moyenne_ic(questions):
+    """Calcule la moyenne et l'intervalle de confiance d'un indicateur."""
+    valeurs = df[[f"Q{q}" for q in questions]].mean(axis=1)
+    n = len(valeurs)
+    m = valeurs.mean()
+    e = stats.t.ppf(0.975, n - 1) * valeurs.std() / np.sqrt(n)
+    return m, m - e, m + e
+
+def indice(valeur, bornes):
+    """Transforme un pourcentage en indice."""
+    return int(np.searchsorted(bornes, valeur * 100))
+
+# ---------------- Calcul des risques ----------------
+resultats = []
+
+for code, (section, nom, proba, impact) in risques.items():
+    p, p_bas, p_haut = moyenne_ic(proba)
+
+    if impact:
+        i, i_bas, i_haut = moyenne_ic(impact)
+        Xi = indice(p, [0, 25, 50, 75])
+        Yi = indice(i, [0, 20, 40, 60, 80])
+        Zi = Xi * Yi
+    else:
+        i = i_bas = i_haut = np.nan
+        Xi = indice(p, [0, 25, 50, 75])
+        Yi = np.nan
+        Zi = np.nan
+
+    resultats.append([code, section, nom, p, i, Xi, Yi, Zi])
+
+resultats = pd.DataFrame(resultats, columns=[
+    "ID", "Section", "Cause", "Probabilité", "Impact", "Xi", "Yi", "Zi"])
+
+print(resultats)
+
+# ---------------- Zone de risque ----------------
+def zone(Xi, Yi):
+    if np.isnan(Yi):
+        return "Pas d'impact"
+    if Xi >= 2.5 and Yi >= 3:
+        return "Zone I"
+    if Xi < 2.5 and Yi >= 3:
+        return "Zone II"
+    if Xi < 2.5 and Yi < 3:
+        return "Zone III"
+    return "Zone IV"
+
+resultats["Zone"] = resultats.apply(lambda r: zone(r.Xi, r.Yi), axis=1)
+
+print("
+Risques classés par Zi :")
+print(resultats.sort_values("Zi", ascending=False))
+
+# ---------------- Cartographie ----------------
+plt.figure(figsize=(8, 6))
+for _, r in resultats.iterrows():
+    if not np.isnan(r.Yi):
+        plt.scatter(r.Xi, r.Yi, s=200)
+        plt.text(r.Xi + 0.1, r.Yi, r.ID)
+
+plt.axvline(2.5, color="gray", linestyle="--")
+plt.axhline(3, color="gray", linestyle="--")
+plt.xlim(0.5, 4.5)
+plt.ylim(0.5, 5.5)
+plt.xlabel("Probabilité (Xi)")
+plt.ylabel("Impact (Yi)")
+plt.title("Cartographie des risques de fraude")
+plt.grid(True)
+plt.savefig("cartographie_risques.png")
+plt.show()
+
+# ---------------- Diagramme Zi ----------------
+donnees = resultats.dropna(subset=["Zi"]).sort_values("Zi")
+
+plt.figure(figsize=(8, 5))
+plt.barh(donnees.Cause, donnees.Zi, color="tomato")
+plt.xlabel("Zi = Xi × Yi")
+plt.title("Coût des risques")
+plt.savefig("cout_risques.png")
+plt.show()
+
+# ---------------- Sauvegarde ----------------
+resultats.to_csv("resultats_risques.csv", index=False)
